@@ -1,12 +1,15 @@
 # particles
 An example of parallel computing
 
-#Requierements:
+# Requierements:
 xcb-dev
 
-#Build:
+# Build:
 Just run:
 make
 
-#Install:
+# Install:
 There is no installation required
+
+# Run
+./particles
