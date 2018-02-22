@@ -13,6 +13,8 @@ const double minX = 10.0;
 const double minY = 10.0;
 const double maxX = 700.0;
 const double maxY = 700.0;
+// Minimal distance to reverce the force between particles
+const double minD2 = 5.0 * 5.0;
 // Border width that reverses velocity
 const int border = 10;
 // Standart delay between display iterations
@@ -51,13 +53,15 @@ class TParticle {
     // Move the particle according on force, time and initial speed
     // Use clock_gettime with CLOCK_MONOTONIC
     void Move ( long t ) {
+      // Some optimization
       double tm = t / m;
       double mt22 = tm*t / 2.0;
       x += vx * t + fx * mt22;
       y += vy * t + fy * mt22;
       vx += fx * tm;
       vy += fy * tm;
-        fx = fy = 0.0;
+      fx = fy = 0.0;
+      // Border protection
       if ( x < minX or x > maxX ) vx = -vx;
       if ( y < minY or y > maxY ) vy = -vy;
       xcbpoint->x = (int)x;
@@ -71,6 +75,7 @@ class TParticle {
       double m1 = neighbor->GetM();
       double d2 = dx*dx + dy*dy; // distance ^ 2 (Pifagor)
       double f = G * m*m1/d2;
+      if (d2 < minD2) { f = -f; }
       double dfx = f * dx / dy;
       double dfy = f * dy / dx;
       fx -= dfx;
