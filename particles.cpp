@@ -111,11 +111,11 @@ class TPArray {
 };
 
 int main () {
-  xcb_connection_t    *c;
+  xcb_connection_t    *connection;
   xcb_screen_t        *screen;
   xcb_drawable_t       win;
   xcb_gcontext_t       foreground;
-  xcb_generic_event_t *e;
+  xcb_generic_event_t *event;
   uint32_t             mask = 0;
   uint32_t             values[2];
 
@@ -128,28 +128,28 @@ int main () {
   }
 
   /* Open the connection to the X server */
-  c = xcb_connect (NULL, NULL);
+  connection = xcb_connect (NULL, NULL);
 
   /* Get the first screen */
-  screen = xcb_setup_roots_iterator (xcb_get_setup (c)).data;
+  screen = xcb_setup_roots_iterator (xcb_get_setup (connection)).data;
 
   /* Create black (foreground) graphic context */
   win = screen->root;
 
-  foreground = xcb_generate_id (c);
+  foreground = xcb_generate_id (connection);
   mask = XCB_GC_FOREGROUND | XCB_GC_GRAPHICS_EXPOSURES;
   values[0] = screen->white_pixel;
   values[1] = 0;
-  xcb_create_gc (c, foreground, win, mask, values);
+  xcb_create_gc (connection, foreground, win, mask, values);
 
   /* Ask for our window's Id */
-  win = xcb_generate_id(c);
+  win = xcb_generate_id(connection);
 
   /* Create the window */
   mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
   values[0] = screen->black_pixel;
   values[1] = XCB_EVENT_MASK_EXPOSURE;
-  xcb_create_window (c,                             /* Connection          */
+  xcb_create_window (connection,                             /* Connection          */
                      XCB_COPY_FROM_PARENT,          /* depth               */
                      win,                           /* window Id           */
                      screen->root,                  /* parent window       */
@@ -161,49 +161,49 @@ int main () {
                      mask, values);                 /* masks */
 
   // Some magic to close window
-  xcb_intern_atom_cookie_t cookie = xcb_intern_atom(c, 1, 12, "WM_PROTOCOLS");
-  xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(c, cookie, 0);
-  xcb_intern_atom_cookie_t cookie2 = xcb_intern_atom(c, 0, 16, "WM_DELETE_WINDOW");
-  xcb_intern_atom_reply_t* reply2 = xcb_intern_atom_reply(c, cookie2, 0);
-  xcb_change_property(c, XCB_PROP_MODE_REPLACE, win, (*reply).atom, 4, 32, 1, &(*reply2).atom);
+  xcb_intern_atom_cookie_t cookie = xcb_intern_atom(connection, 1, 12, "WM_PROTOCOLS");
+  xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(connection, cookie, 0);
+  xcb_intern_atom_cookie_t cookie2 = xcb_intern_atom(connection, 0, 16, "WM_DELETE_WINDOW");
+  xcb_intern_atom_reply_t* reply2 = xcb_intern_atom_reply(connection, cookie2, 0);
+  xcb_change_property(connection, XCB_PROP_MODE_REPLACE, win, (*reply).atom, 4, 32, 1, &(*reply2).atom);
 
   /* Map the window on the screen */
-  xcb_map_window (c, win);
+  xcb_map_window (connection, win);
 
 
   /* We flush the request */
-  xcb_flush (c);
+  xcb_flush (connection);
 
   while (1) {
-    if ((e = xcb_poll_for_event (c))== NULL) {
+    if ((event = xcb_poll_for_event (connection))== NULL) {
         clock_nanosleep (CLOCK_MONOTONIC, 0, &delay, &delay);
-	std::cout<<"tick"<<std::endl;
+	      std::cout<<"tick"<<std::endl;
         continue;
     }
-    switch (e->response_type & ~0x80) {
+    switch (event->response_type & ~0x80) {
       case XCB_EXPOSE: {
         /* We draw the points */
-        xcb_poly_point (c, XCB_COORD_MODE_ORIGIN, win, foreground, N, points);
+        xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, foreground, N, points);
 
         /* We flush the request */
-        xcb_flush (c);
+        xcb_flush (connection);
 
         break;
       }
       case XCB_CLIENT_MESSAGE: {
           // The magic continues
-          if((*(xcb_client_message_event_t*)e).data.data32[0] == (*reply2).atom) {
+          if((*(xcb_client_message_event_t*)event).data.data32[0] == (*reply2).atom) {
               return 0;
 	  }
 	  break;
       }
       default: {
-        /* Unknown event type, ignore it */
+              /* Unknown event type, ignore it */
         break;
       }
     }
     /* Free the Generic Event */
-    free (e);
+    free (event);
   }
 
   return 0;
