@@ -73,6 +73,10 @@ class TParticle {
       vx += fx * tm;
       vy += fy * tm;
       fx = fy = 0.0;
+      if ( x < minX+border ) x = minX + border + 2;
+      if ( y < minY+border ) y = minY + border + 2;
+      if ( x > maxX-border ) x = maxX - border - 2;
+      if ( y > maxY-border ) y = maxY - border - 2;
     }
 
     // Calculate force between two particles and add it to both
