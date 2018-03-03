@@ -6,19 +6,20 @@
 #include <xcb/xcb.h>
 
 // Particles amount
-const int N = 80;
+const int N = 20;
 // Gravity constant
 const double G = 0.0001;
 const double minX = 0.0;
 const double minY = 0.0;
 const double maxX = 700.0;
 const double maxY = 700.0;
+const double MASS = 10.0;
 // Minimal distance to reverce the force between particles
-const double minD2 = 2.0 * 2.0;
+const double minD2 = 4.0 * 4.0;
 // Border width that reverses velocity
 const int border = 10;
 // Standart delay between display iterations
-timespec delay = { 0, 2000000 };
+timespec delay = { 0, 200000 };
 //timespec delay = { 1, 0 };
 
 class TParticle {
@@ -65,34 +66,35 @@ class TParticle {
       double mt22 = tm*t / 2.0;
 
       // Border protection
-      if ( x < minX+border or x > maxX-border ) vx = -vx*0.9;
-      if ( y < minY+border or y > maxY-border ) vy = -vy*0.9;
+      if ( x < minX+border or x > maxX-border ) vx = -vx;
+      if ( y < minY+border or y > maxY-border ) vy = -vy;
 
       x += vx * t + fx * mt22;
       y += vy * t + fy * mt22;
       vx += fx * tm;
       vy += fy * tm;
       fx = fy = 0.0;
-      if ( x < minX+border ) x = minX + border + 2;
-      if ( y < minY+border ) y = minY + border + 2;
-      if ( x > maxX-border ) x = maxX - border - 2;
-      if ( y > maxY-border ) y = maxY - border - 2;
+      //if ( x < minX+border ) x = minX + border + 2;
+      //if ( y < minY+border ) y = minY + border + 2;
+      //if ( x > maxX-border ) x = maxX - border - 2;
+      //if ( y > maxY-border ) y = maxY - border - 2;
     }
 
     // Calculate force between two particles and add it to both
     void CalcForce (TParticle *neighbor) {
-      double dx = x - neighbor->GetX();
-      double dy = y - neighbor->GetY();
-      double m1 = neighbor->GetM();
+      double dx = x - neighbor->x;
+      double dy = y - neighbor->y;
+      double m1 = neighbor->m;
       double d2 = dx*dx + dy*dy; // distance ^ 2 (Pifagor)
+      double dd = sqrt(d2);
       double f = G * m*m1/d2;
-      if (d2 < minD2) { f = -f/100; }
-      double dfx = f * dx / dy;
-      double dfy = f * dy / dx;
-      fx += dfx;
-      fy += dfy;
-      neighbor->fx -= dfx;
-      neighbor->fy -= dfy;
+      if (d2 < minD2) { f = -f/100000000; }
+      double dfx = f * dx / dd;
+      double dfy = f * dy / dd;
+      fx -= dfx;
+      fy -= dfy;
+      neighbor->fx += dfx;
+      neighbor->fy += dfy;
     }
 };
 
@@ -104,7 +106,8 @@ class TPArray {
       xpoints = xp;
       container = new TParticle[N];
       for (int i=0; i<N; i++) {
-        container[i].Init ((maxX-border)*i/N + sqrt(i)+border, (maxY-border)*i/N+border, 0.5, xpoints + i);
+        container[i].Init ((maxX-border*2)*i/N + sqrt(i) + border,
+                           (maxY-border*2)*i/N + border, MASS, xpoints + i);
       }
     }
 
@@ -224,17 +227,17 @@ int main () {
         //std::cout<<points[i].x<<std::endl;
       //}
 
-      if (n % 50 == 0) {
+      if (n % 100 == 0) {
         xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, background, N, points);
         tpa.Draw();
         xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, foreground, N, points);
         xcb_flush (connection);
       }
-      if (n == 500) {
-        std::cout<<"tick"<<std::endl;
+      if (n == 5000) {
+        //std::cout<<"tick"<<std::endl;
         n = 0;
         for (int i=0; i<N; i++) {
-          std::cout<<points[i].x<<"-"<<points[i].y<<std::endl;
+          //std::cout<<points[i].x<<"-"<<points[i].y<<std::endl;
         }
       }
       else {n++;}
