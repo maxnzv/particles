@@ -3,6 +3,8 @@
 #include <math.h>
 #include <time.h>
 
+#include <thread>
+
 #include <xcb/xcb.h>
 
 // Particles amount
@@ -13,14 +15,19 @@ const double minX = 0.0;
 const double minY = 0.0;
 const double maxX = 700.0;
 const double maxY = 700.0;
-const double MASS = 10.0;
+const double MASS = 1.0;
+// A force decrement to simulate collisions
+const double cf = 0.0000001;
 // Minimal distance to reverce the force between particles
-const double minD2 = 4.0 * 4.0;
+const double minD2 = 8.0 * 8.0;
 // Border width that reverses velocity
 const int border = 10;
-// Standart delay between display iterations
-timespec delay = { 0, 200000 };
+// Standart delay between display iterations 50 FPS
+timespec delay = { 0, 20000000 };
 //timespec delay = { 1, 0 };
+int finish = 0;
+// Calculations per second
+long cps = 0;
 
 class TParticle {
     // Mass
@@ -88,7 +95,7 @@ class TParticle {
       double d2 = dx*dx + dy*dy; // distance ^ 2 (Pifagor)
       double dd = sqrt(d2);
       double f = G * m*m1/d2;
-      if (d2 < minD2) { f = -f/100000000; }
+      if (d2 < minD2) { f = -f*cf; }
       double dfx = f * dx / dd;
       double dfy = f * dy / dd;
       fx -= dfx;
@@ -111,10 +118,11 @@ class TPArray {
       }
     }
 
-    // Calculate forces among all particles
-    void Calculate (void) {
-      for (int i=0; i<N-1; i++) {
-        for (int j=i+1; j<N; j++) {
+    // Calculate forces among "amount" particles original:
+    // from start and neighbors from nstart
+    void Calculate (int start = 0, int nstart = 1, int amount = N) {
+      for (int i=start; i<amount-1; i++) {
+        for (int j=i+nstart; j<amount; j++) {
           container[i].CalcForce (container + j);
         }
       }
@@ -139,10 +147,11 @@ class TPArray {
 };
 
 void CalcAndMove (TPArray *ppa) {
-  //while (1) {
+  while (!finish) {
+    cps++;
     ppa->Calculate();
     ppa->Move(1);
-  //}
+  }
 }
 
 int main () {
@@ -215,30 +224,30 @@ int main () {
   /* We flush the request */
   xcb_flush (connection);
 
+  std::thread cm (CalcAndMove, &tpa);
+
   int n = 0;
 
   while (1) {
     if ((event = xcb_poll_for_event (connection))== NULL) {
       clock_nanosleep (CLOCK_MONOTONIC, 0, &delay, &delay);
-      CalcAndMove(&tpa);
 
       //tpa.Draw();
       //for (int i=0; i<N; i++) {
         //std::cout<<points[i].x<<std::endl;
       //}
 
-      if (n % 100 == 0) {
-        xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, background, N, points);
-        tpa.Draw();
-        xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, foreground, N, points);
-        xcb_flush (connection);
-      }
-      if (n == 5000) {
-        //std::cout<<"tick"<<std::endl;
+      xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, background, N, points);
+      tpa.Draw();
+      xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, foreground, N, points);
+      xcb_flush (connection);
+      if (n == 50) {
+        std::cout<<"tick: "<<cps<<std::endl;
         n = 0;
-        for (int i=0; i<N; i++) {
+        cps = 0;
+        //for (int i=0; i<N; i++) {
           //std::cout<<points[i].x<<"-"<<points[i].y<<std::endl;
-        }
+        //}
       }
       else {n++;}
       continue;
@@ -256,7 +265,9 @@ int main () {
       case XCB_CLIENT_MESSAGE: {
           // The magic continues
           if((*(xcb_client_message_event_t*)event).data.data32[0] == (*reply2).atom) {
-              return 0;
+            finish = 1;
+            cm.join();
+            return 0;
 	  }
 	  break;
       }
