@@ -1,25 +1,31 @@
-#include <stdlib.h>
 #include <iostream>
 #include <math.h>
 #include <time.h>
 
 #include <thread>
+#include <vector>
 
 #include <xcb/xcb.h>
 
 // Particles amount
 const int N = 20;
+// Threads amount
+const int threads = 2;
+std::vector<std::thread> VThread;
 // Gravity constant
 const double G = 0.0001;
 const double minX = 0.0;
 const double minY = 0.0;
-const double maxX = 700.0;
+const double minZ = 0.0;
+const double maxX = 1024.0;
 const double maxY = 700.0;
+const double maxZ = 700.0;
 const double MASS = 1.0;
 // A force decrement to simulate collisions
-const double cf = 0.0000001;
+const double cf = 0.9;
 // Minimal distance to reverce the force between particles
-const double minD2 = 8.0 * 8.0;
+const double minDD = 4.0;
+const double minD2 = minDD * minDD * minDD;
 // Border width that reverses velocity
 const int border = 10;
 // Standart delay between display iterations 50 FPS
@@ -28,36 +34,35 @@ timespec delay = { 0, 20000000 };
 int finish = 0;
 // Calculations per second
 long cps = 0;
+// Are we ready to move
+int movePending = 0;
 
 class TParticle {
     // Mass
     double m;
     // Coordinates
-    double x, y;
+    double x, y, z;
     // Velocity
-    double vx, vy;
+    double vx, vy, vz;
     // Force
-    double fx, fy;
+    double fx, fy, fz;
     // Coordinates for drawing
     xcb_point_t *xcbpoint;
   public:
     TParticle () {
-      m = x = y = vx = vy = fx = fy = 0;
+      m = x = y = z = vx = vy = vz = fx = fy = fz = 0;
       xcbpoint = NULL;
     }
     void Init (double X, double Y, double M, xcb_point_t *point) {
       x = X;
       y = Y;
+      z = X;
       m = M;
       xcbpoint = point;
       xcbpoint->x = (int)x;
       xcbpoint->y = (int)y;
-      vx = vy = fx = fy = 0.0;
+      vx = vy = vz = fx = fy = fz = 0.0;
     }
-
-    double GetX (void) { return x; }
-    double GetY (void) { return y; }
-    double GetM (void) { return m; }
 
     // Save coordinates to future drawing
     void Draw (void) {
@@ -75,33 +80,36 @@ class TParticle {
       // Border protection
       if ( x < minX+border or x > maxX-border ) vx = -vx;
       if ( y < minY+border or y > maxY-border ) vy = -vy;
+      if ( z < minZ+border or z > maxZ-border ) vz = -vz;
 
       x += vx * t + fx * mt22;
       y += vy * t + fy * mt22;
+      z += vz * t + fz * mt22;
       vx += fx * tm;
       vy += fy * tm;
-      fx = fy = 0.0;
-      //if ( x < minX+border ) x = minX + border + 2;
-      //if ( y < minY+border ) y = minY + border + 2;
-      //if ( x > maxX-border ) x = maxX - border - 2;
-      //if ( y > maxY-border ) y = maxY - border - 2;
+      vz += fz * tm;
+      fx = fy = fz = 0.0;
     }
 
     // Calculate force between two particles and add it to both
     void CalcForce (TParticle *neighbor) {
       double dx = x - neighbor->x;
       double dy = y - neighbor->y;
+      double dz = z - neighbor->z;
       double m1 = neighbor->m;
-      double d2 = dx*dx + dy*dy; // distance ^ 2 (Pifagor)
-      double dd = sqrt(d2);
+      double d2 = dx*dx + dy*dy + dz*dz; // distance ^ 3 (Pifagor)
+      double dd = cbrt(d2);
       double f = G * m*m1/d2;
       if (d2 < minD2) { f = -f*cf; }
       double dfx = f * dx / dd;
       double dfy = f * dy / dd;
+      double dfz = f * dz / dd;
       fx -= dfx;
       fy -= dfy;
+      fz -= dfz;
       neighbor->fx += dfx;
       neighbor->fy += dfy;
+      neighbor->fz += dfz;
     }
 };
 
@@ -112,25 +120,27 @@ class TPArray {
     TPArray (xcb_point_t *xp) {
       xpoints = xp;
       container = new TParticle[N];
-      for (int i=0; i<N; i++) {
+      for (int i=0; i<N-1; i++) {
         container[i].Init ((maxX-border*2)*i/N + sqrt(i) + border,
                            (maxY-border*2)*i/N + border, MASS, xpoints + i);
       }
+      container[N-1].Init ((maxX-border*2) + border,
+                         border * 2, MASS * 2, xpoints + N-1);
     }
 
     // Calculate forces among "amount" particles original:
     // from start and neighbors from nstart
-    void Calculate (int start = 0, int nstart = 1, int amount = N) {
-      for (int i=start; i<amount-1; i++) {
-        for (int j=i+nstart; j<amount; j++) {
+    void Calculate (int start = 0, int amount = N) {
+      for (int i=start; i<start+amount-1; i++) {
+        for (int j=i+1; j<N; j++) {
           container[i].CalcForce (container + j);
         }
       }
     }
 
     // Move every particle according applied forces
-    void Move (long t) {
-      for (int i=0; i<N; i++) {
+    void Move (long t, int start = 0, int amount = N) {
+      for (int i=start; i<start+amount; i++) {
         container[i].Move (t);
       }
     }
@@ -146,11 +156,21 @@ class TPArray {
     }
 };
 
-void CalcAndMove (TPArray *ppa) {
+void CalcAndMove (TPArray *ppa, int start = 0, int amount = N) {
   while (!finish) {
     cps++;
-    ppa->Calculate();
-    ppa->Move(1);
+    // Particles in this thread are not ready to move
+    movePending++;
+    ppa->Calculate(start, amount);
+    // Particles are ready to move
+    movePending--;
+    // Wait for other threads to complete calculations
+    //std::cout<<movePending<<std::endl;
+    //while (movePending) { 
+      //std::this_thread::yield();
+      //if (movePending < 0) movePending = 0;
+    //}
+    ppa->Move(1, start, amount);
   }
 }
 
@@ -224,7 +244,14 @@ int main () {
   /* We flush the request */
   xcb_flush (connection);
 
-  std::thread cm (CalcAndMove, &tpa);
+  for (int i=0;i<threads;i++) {
+    std::cout<<i<<std::endl;
+    VThread.push_back(std::thread (CalcAndMove, &tpa, N*i/threads, N/threads));
+  }
+
+  //std::thread cm (CalcAndMove, &tpa, 0, N/3);
+  //std::thread cm1 (CalcAndMove, &tpa, N/3+1, N/3);
+  //std::thread cm2 (CalcAndMove, &tpa, N/3*2+2, N/3);
 
   int n = 0;
 
@@ -242,7 +269,7 @@ int main () {
       xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, foreground, N, points);
       xcb_flush (connection);
       if (n == 50) {
-        std::cout<<"tick: "<<cps<<std::endl;
+        std::cout<<"tick: "<<cps<<", "<<movePending<<std::endl;
         n = 0;
         cps = 0;
         //for (int i=0; i<N; i++) {
@@ -266,7 +293,12 @@ int main () {
           // The magic continues
           if((*(xcb_client_message_event_t*)event).data.data32[0] == (*reply2).atom) {
             finish = 1;
-            cm.join();
+            for (auto& th: VThread) {
+              th.join();
+            }
+            //cm.join();
+            //cm1.join();
+            //cm2.join();
             return 0;
 	  }
 	  break;
