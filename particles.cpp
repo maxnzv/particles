@@ -39,6 +39,7 @@ long cps = 0;
 // Are we ready to move
 int movePending;
 std::mutex moveMutex;
+std::mutex cpsMutex;
 
 class TParticle {
     // Mass
@@ -161,7 +162,9 @@ class TPArray {
 
 void CalcAndMove (TPArray *ppa, int start = 0, int amount = N) {
   while (!finish) {
+    cpsMutex.lock();
     cps++;
+    cpsMutex.unlock();
     // Particles in this thread are not ready to move
     moveMutex.lock();
     movePending++;
@@ -282,7 +285,9 @@ int main () {
         std::cout<<"tick: "<<cps<<", "<<movePending<<std::endl;
         moveMutex.unlock();
         n = 0;
+	cpsMutex.lock();
         cps = 0;
+	cpsMutex.unlock();
         //for (int i=0; i<N; i++) {
           //std::cout<<points[i].x<<"-"<<points[i].y<<std::endl;
         //}
