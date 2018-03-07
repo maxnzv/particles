@@ -2,6 +2,8 @@
 #include <math.h>
 #include <time.h>
 
+#include <mutex>
+
 #include <thread>
 #include <vector>
 
@@ -35,7 +37,8 @@ int finish = 0;
 // Calculations per second
 long cps = 0;
 // Are we ready to move
-int movePending = 0;
+int movePending;
+std::mutex moveMutex;
 
 class TParticle {
     // Mass
@@ -160,16 +163,18 @@ void CalcAndMove (TPArray *ppa, int start = 0, int amount = N) {
   while (!finish) {
     cps++;
     // Particles in this thread are not ready to move
+    moveMutex.lock();
     movePending++;
+    moveMutex.unlock();
     ppa->Calculate(start, amount);
     // Particles are ready to move
+    moveMutex.lock();
     movePending--;
+    moveMutex.unlock();
     // Wait for other threads to complete calculations
-    //std::cout<<movePending<<std::endl;
-    //while (movePending) { 
-      //std::this_thread::yield();
-      //if (movePending < 0) movePending = 0;
-    //}
+    while (movePending) { 
+      std::this_thread::yield();
+    }
     ppa->Move(1, start, amount);
   }
 }
@@ -244,6 +249,10 @@ int main () {
   /* We flush the request */
   xcb_flush (connection);
 
+  // Creating a mutex and threads
+  moveMutex.lock();
+  movePending = 0;
+  moveMutex.unlock();
   for (int i=0;i<threads;i++) {
     std::cout<<i<<std::endl;
     VThread.push_back(std::thread (CalcAndMove, &tpa, N*i/threads, N/threads));
@@ -269,7 +278,9 @@ int main () {
       xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, foreground, N, points);
       xcb_flush (connection);
       if (n == 50) {
+        moveMutex.lock();
         std::cout<<"tick: "<<cps<<", "<<movePending<<std::endl;
+        moveMutex.unlock();
         n = 0;
         cps = 0;
         //for (int i=0; i<N; i++) {
