@@ -35,11 +35,12 @@ timespec delay = { 0, 20000000 };
 //timespec delay = { 1, 0 };
 int finish = 0;
 // Calculations per second
-long cps = 0;
+long cps[threads];
 // Are we ready to move
 int movePending;
 std::mutex moveMutex;
-std::mutex cpsMutex;
+int calcPending;
+std::mutex calcMutex;
 
 class TParticle {
     // Mass
@@ -132,10 +133,9 @@ class TPArray {
                          border * 2, MASS * 2, xpoints + N-1);
     }
 
-    // Calculate forces among "amount" particles original:
-    // from start and neighbors from nstart
+    // Calculate forces among "amount" particles from "start" and others
     void Calculate (int start = 0, int amount = N) {
-      for (int i=start; i<start+amount-1; i++) {
+      for (int i=start; i<start+amount; i++) {
         for (int j=i+1; j<N; j++) {
           container[i].CalcForce (container + j);
         }
@@ -160,16 +160,16 @@ class TPArray {
     }
 };
 
-void CalcAndMove (TPArray *ppa, int start = 0, int amount = N) {
+void CalcAndMove (TPArray *ppa, int index, int start = 0, int amount = N) {
   while (!finish) {
-    cpsMutex.lock();
-    cps++;
-    cpsMutex.unlock();
+    cps[index]++;
     // Particles in this thread are not ready to move
     moveMutex.lock();
     movePending++;
     moveMutex.unlock();
+
     ppa->Calculate(start, amount);
+
     // Particles are ready to move
     moveMutex.lock();
     movePending--;
@@ -178,7 +178,19 @@ void CalcAndMove (TPArray *ppa, int start = 0, int amount = N) {
     while (movePending) { 
       std::this_thread::yield();
     }
+
+    calcMutex.lock();
+    calcPending++;
+    calcMutex.unlock();
+
     ppa->Move(1, start, amount);
+
+    calcMutex.lock();
+    calcPending--;
+    calcMutex.unlock();
+    while (calcPending) { 
+      std::this_thread::yield();
+    }
   }
 }
 
@@ -195,10 +207,6 @@ int main () {
   /* geometric objects */
   xcb_point_t          points[N];
   TPArray tpa(points);
-
-  for (int i=0; i<N; i++) {
-    std::cout<<points[i].x<<"-"<<points[i].y<<std::endl;
-  }
 
   /* Open the connection to the X server */
   connection = xcb_connect (NULL, NULL);
@@ -256,9 +264,12 @@ int main () {
   moveMutex.lock();
   movePending = 0;
   moveMutex.unlock();
+  calcMutex.lock();
+  calcPending = 0;
+  calcMutex.unlock();
   for (int i=0;i<threads;i++) {
     std::cout<<i<<std::endl;
-    VThread.push_back(std::thread (CalcAndMove, &tpa, N*i/threads, N/threads));
+    VThread.push_back(std::thread (CalcAndMove, &tpa, i, N*i/threads, N/threads));
   }
 
   //std::thread cm (CalcAndMove, &tpa, 0, N/3);
@@ -282,12 +293,14 @@ int main () {
       xcb_flush (connection);
       if (n == 50) {
         moveMutex.lock();
-        std::cout<<"tick: "<<cps<<", "<<movePending<<std::endl;
+        std::cout<<"tick: ";
+        for (int i=0;i<threads;i++) {
+          std::cout<<cps[i]<<" ";
+          cps[i] = 0;
+	}
+	std::cout<<movePending<<std::endl;
         moveMutex.unlock();
         n = 0;
-	cpsMutex.lock();
-        cps = 0;
-	cpsMutex.unlock();
         //for (int i=0; i<N; i++) {
           //std::cout<<points[i].x<<"-"<<points[i].y<<std::endl;
         //}
