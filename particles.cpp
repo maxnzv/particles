@@ -10,19 +10,19 @@
 #include <xcb/xcb.h>
 
 // Particles amount
-const int N = 20;
+#define N 40
 // Threads amount
-const int threads = 2;
+#define THREADS 2
 std::vector<std::thread> VThread;
 // Gravity constant
-const double G = 0.0001;
+#define G 0.0001
 const double minX = 0.0;
 const double minY = 0.0;
 const double minZ = 0.0;
 const double maxX = 1024.0;
 const double maxY = 700.0;
 const double maxZ = 700.0;
-const double MASS = 1.0;
+#define MASS 1.0
 // A force decrement to simulate collisions
 const double cf = 0.9;
 // Minimal distance to reverce the force between particles
@@ -35,7 +35,7 @@ timespec delay = { 0, 20000000 };
 //timespec delay = { 1, 0 };
 int finish = 0;
 // Calculations per second
-long cps[threads];
+long cps[THREADS];
 // Are we ready to move
 int movePending;
 std::mutex moveMutex;
@@ -164,17 +164,20 @@ void CalcAndMove (TPArray *ppa, int index, int start = 0, int amount = N) {
   while (!finish) {
     cps[index]++;
     // Particles in this thread are not ready to move
+#if THREADS>1
     moveMutex.lock();
     movePending++;
     moveMutex.unlock();
+#endif
 
     ppa->Calculate(start, amount);
 
     // Particles are ready to move
+#if THREADS>1
     moveMutex.lock();
     movePending--;
     moveMutex.unlock();
-    // Wait for other threads to complete calculations
+    // Wait for other THREADS to complete calculations
     while (movePending) { 
       std::this_thread::yield();
     }
@@ -182,15 +185,18 @@ void CalcAndMove (TPArray *ppa, int index, int start = 0, int amount = N) {
     calcMutex.lock();
     calcPending++;
     calcMutex.unlock();
+#endif
 
     ppa->Move(1, start, amount);
 
+#if THREADS>1
     calcMutex.lock();
     calcPending--;
     calcMutex.unlock();
     while (calcPending) { 
       std::this_thread::yield();
     }
+#endif
   }
 }
 
@@ -260,16 +266,16 @@ int main () {
   /* We flush the request */
   xcb_flush (connection);
 
-  // Creating a mutex and threads
+  // Creating a mutex and THREADS
   moveMutex.lock();
   movePending = 0;
   moveMutex.unlock();
   calcMutex.lock();
   calcPending = 0;
   calcMutex.unlock();
-  for (int i=0;i<threads;i++) {
+  for (int i=0;i<THREADS;i++) {
     std::cout<<i<<std::endl;
-    VThread.push_back(std::thread (CalcAndMove, &tpa, i, N*i/threads, N/threads));
+    VThread.push_back(std::thread (CalcAndMove, &tpa, i, N*i/THREADS, N/THREADS));
   }
 
   //std::thread cm (CalcAndMove, &tpa, 0, N/3);
@@ -282,11 +288,6 @@ int main () {
     if ((event = xcb_poll_for_event (connection))== NULL) {
       clock_nanosleep (CLOCK_MONOTONIC, 0, &delay, &delay);
 
-      //tpa.Draw();
-      //for (int i=0; i<N; i++) {
-        //std::cout<<points[i].x<<std::endl;
-      //}
-
       xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, background, N, points);
       tpa.Draw();
       xcb_poly_point (connection, XCB_COORD_MODE_ORIGIN, win, foreground, N, points);
@@ -294,16 +295,13 @@ int main () {
       if (n == 50) {
         moveMutex.lock();
         std::cout<<"tick: ";
-        for (int i=0;i<threads;i++) {
+        for (int i=0;i<THREADS;i++) {
           std::cout<<cps[i]<<" ";
           cps[i] = 0;
 	}
-	std::cout<<movePending<<std::endl;
+	std::cout<<movePending<<" "<<calcPending<<std::endl;
         moveMutex.unlock();
         n = 0;
-        //for (int i=0; i<N; i++) {
-          //std::cout<<points[i].x<<"-"<<points[i].y<<std::endl;
-        //}
       }
       else {n++;}
       continue;
