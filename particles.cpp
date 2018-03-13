@@ -10,9 +10,9 @@
 #include <xcb/xcb.h>
 
 // Particles amount
-#define N 40
+#define N 20
 // Threads amount
-#define THREADS 2
+#define THREADS 4
 std::vector<std::thread> VThread;
 // Gravity constant
 #define G 0.0001
@@ -214,7 +214,7 @@ int main () {
   xcb_point_t          points[N];
   TPArray tpa(points);
 
-  /* Open the connection to the X server */
+  /* Open a connection to the X server */
   connection = xcb_connect (NULL, NULL);
 
   /* Get the first screen */
@@ -266,7 +266,7 @@ int main () {
   /* We flush the request */
   xcb_flush (connection);
 
-  // Creating a mutex and THREADS
+  // Creating threads
   moveMutex.lock();
   movePending = 0;
   moveMutex.unlock();
@@ -277,10 +277,6 @@ int main () {
     std::cout<<i<<std::endl;
     VThread.push_back(std::thread (CalcAndMove, &tpa, i, N*i/THREADS, N/THREADS));
   }
-
-  //std::thread cm (CalcAndMove, &tpa, 0, N/3);
-  //std::thread cm1 (CalcAndMove, &tpa, N/3+1, N/3);
-  //std::thread cm2 (CalcAndMove, &tpa, N/3*2+2, N/3);
 
   int n = 0;
 
@@ -323,9 +319,6 @@ int main () {
             for (auto& th: VThread) {
               th.join();
             }
-            //cm.join();
-            //cm1.join();
-            //cm2.join();
             return 0;
 	  }
 	  break;
