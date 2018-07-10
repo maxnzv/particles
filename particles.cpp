@@ -103,7 +103,7 @@ class TParticle {
       double dz = z - neighbor->z;
       double m1 = neighbor->m;
       double d2 = dx*dx + dy*dy + dz*dz; // distance ^ 3 (Pifagor)
-      double dd = cbrt(d2);
+      double dd = sqrt(d2);
       double f = G * m*m1/d2;
       if (d2 < minD2) { f = -f*cf; }
       double dfx = f * dx / dd;
